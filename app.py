@@ -145,42 +145,148 @@ def load_stock_data(ticker="AAPL", period="1d"):
 # Replace the existing data loading with this
 df_stock, company_info, news = load_stock_data(selected_ticker, time_period)
 
-# Update the competitors dictionary to be more dynamic
-@st.cache_data(ttl=3600)
-def get_competitors(ticker):
-    competitors_map = {
-        'AAPL': {'MSFT': 'Microsoft', 'GOOGL': 'Google', 'SAMSUNG.KS': 'Samsung'},
-        'MSFT': {'AAPL': 'Apple', 'GOOGL': 'Google', 'ORCL': 'Oracle'},
-        'GOOGL': {'MSFT': 'Microsoft', 'META': 'Meta', 'AMZN': 'Amazon'},
-        'AMZN': {'GOOGL': 'Google', 'MSFT': 'Microsoft', 'WMT': 'Walmart'},
-        'META': {'GOOGL': 'Google', 'SNAP': 'Snap', 'PINS': 'Pinterest'},
-        'NVDA': {'AMD': 'AMD', 'INTC': 'Intel', 'TSM': 'TSMC'},
-        'TSLA': {'F': 'Ford', 'GM': 'General Motors', 'TM': 'Toyota'}
-    }
-    return competitors_map.get(ticker, {'AAPL': 'Apple', 'MSFT': 'Microsoft', 'GOOGL': 'Google'})
+# Create tabs at the top of your app (put this after your sidebar)
+tab1, tab2, tab3 = st.tabs(["Overview", "Technical Analysis", "Competitor Analysis"])
 
-# Add this function after get_competitors function
-@st.cache_data(ttl=3600)
-def load_competitors_data():
-    comp_data = {}
-    comp_info = {}
+# Overview Tab
+with tab1:
+    st.header("Stock Overview")
+    # Your existing overview code here...
+
+# Technical Analysis Tab
+with tab2:
+    st.header("Technical Analysis")
+    # Your existing technical analysis code here...
+
+# Competitor Analysis Tab
+with tab3:
+    st.header("Competitor Analysis")
     
-    # Get data for each competitor
-    for comp_ticker in competitors.keys():
+    try:
+        # Initialize empty DataFrame for comparison
+        comp_prices = pd.DataFrame()
+        
+        # Verify main stock data
+        if df_stock is not None and not df_stock.empty and 'Close' in df_stock.columns:
+            main_prices = df_stock['Close']
+            if len(main_prices) > 0 and not main_prices.isna().all():
+                first_valid_price = main_prices.dropna().values[0]
+                if first_valid_price > 0:
+                    comp_prices[selected_ticker] = (main_prices / first_valid_price) * 100
+                    st.success(f"Successfully loaded data for {selected_ticker}")
+                else:
+                    st.warning(f"Invalid price data for {selected_ticker}")
+        else:
+            st.warning(f"No data available for {selected_ticker}")
+        
+        # Define competitors with error checking
         try:
-            stock = yf.Ticker(comp_ticker)
-            # Use the same time period as the main stock
-            comp_data[comp_ticker] = stock.history(period=time_period)
-            comp_info[comp_ticker] = stock.info
+            if selected_ticker == 'AAPL':
+                competitors = ['MSFT']
+            elif selected_ticker == 'MSFT':
+                competitors = ['AAPL']
+            elif selected_ticker == 'GOOGL':
+                competitors = ['MSFT']
+            elif selected_ticker == 'AMZN':
+                competitors = ['MSFT']
+            elif selected_ticker == 'META':
+                competitors = ['GOOGL']
+            elif selected_ticker == 'NVDA':
+                competitors = ['AMD']
+            elif selected_ticker == 'TSLA':
+                competitors = ['F']
+            else:
+                competitors = ['AAPL']
         except Exception as e:
-            st.warning(f"Could not load data for {comp_ticker}: {str(e)}")
-            continue
-    
-    return comp_data, comp_info
-
-# Then use it to load competitor data
-competitors = get_competitors(selected_ticker)
-comp_data, comp_info = load_competitors_data()
+            competitors = ['AAPL']  # Default fallback
+            st.warning("Using default competitor (AAPL)")
+        
+        # Add competitor data with extensive error checking
+        for comp_ticker in competitors:
+            try:
+                # Download data with timeout
+                comp_data = yf.download(comp_ticker, period=time_period, progress=False)
+                
+                if comp_data is not None and not comp_data.empty and 'Close' in comp_data.columns:
+                    prices = comp_data['Close']
+                    
+                    if len(prices) > 0 and not prices.isna().all():
+                        first_valid_price = prices.dropna().values[0]
+                        
+                        if first_valid_price > 0:
+                            comp_prices[comp_ticker] = (prices / first_valid_price) * 100
+                            st.success(f"Successfully loaded data for {comp_ticker}")
+                        else:
+                            st.warning(f"Invalid price data for {comp_ticker}")
+                    else:
+                        st.warning(f"No valid price data for {comp_ticker}")
+                else:
+                    st.warning(f"No data available for {comp_ticker}")
+                    
+            except Exception as e:
+                st.warning(f"Error loading data for {comp_ticker}: {str(e)}")
+                continue
+        
+        # Create visualization with error checking
+        if not comp_prices.empty and len(comp_prices.columns) > 0:
+            try:
+                fig = go.Figure()
+                
+                for column in comp_prices.columns:
+                    if not comp_prices[column].isna().all():
+                        fig.add_trace(go.Scatter(
+                            x=comp_prices.index,
+                            y=comp_prices[column],
+                            name=column,
+                            mode='lines'
+                        ))
+                
+                fig.update_layout(
+                    title={
+                        'text': 'Relative Price Performance (%)',
+                        'y':0.95,
+                        'x':0.5,
+                        'xanchor': 'center',
+                        'yanchor': 'top'
+                    },
+                    xaxis_title='Date',
+                    yaxis_title='Price (%)',
+                    height=500,
+                    showlegend=True,
+                    legend=dict(
+                        yanchor="top",
+                        y=0.99,
+                        xanchor="left",
+                        x=0.01
+                    ),
+                    hovermode='x unified'
+                )
+                
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # Show current values with error checking
+                if len(comp_prices) > 0:
+                    current_values = comp_prices.iloc[-1].dropna().round(2)
+                    if not current_values.empty:
+                        st.subheader("Current Performance")
+                        df_display = pd.DataFrame({
+                            'Relative Performance (%)': current_values
+                        })
+                        st.dataframe(df_display, use_container_width=True)
+                    else:
+                        st.warning("No current values available")
+                else:
+                    st.warning("No performance data available")
+                    
+            except Exception as e:
+                st.error(f"Error creating visualization: {str(e)}")
+        else:
+            st.warning("No comparison data available for visualization")
+            
+    except Exception as e:
+        st.error("Error in competitor analysis")
+        st.error(f"Details: {str(e)}")
+        st.info("Please try a different stock or time period")
 
 def calculate_technical_indicators(df):
     # Existing indicators
@@ -327,36 +433,6 @@ with tab2:
         fig_atr.update_layout(title='Average True Range (ATR)')
         st.plotly_chart(fig_atr, use_container_width=True)
 
-with tab3:
-    # Competitor Analysis Section
-    st.header("Competitor Analysis")
-    
-    # Normalize prices for comparison
-    comp_prices = pd.DataFrame()
-    for ticker, name in competitors.items():
-        if ticker in comp_data:
-            prices = comp_data[ticker]['Close']
-            comp_prices[name] = prices / prices.iloc[0] * 100
-
-    fig_comp = px.line(comp_prices, title='Price Performance Comparison (Normalized)')
-    st.plotly_chart(fig_comp, use_container_width=True)
-    
-    # Market Cap Comparison
-    market_caps = {}
-    for ticker in competitors:
-        try:
-            stock = yf.Ticker(ticker)
-            market_caps[competitors[ticker]] = stock.info.get('marketCap', 0) / 1e9
-        except:
-            continue
-    
-    fig_market_cap = px.bar(
-        x=list(market_caps.keys()),
-        y=list(market_caps.values()),
-        title='Market Capitalization Comparison (Billion $)'
-    )
-    st.plotly_chart(fig_market_cap, use_container_width=True)
-
 with tab4:
     # News & Sentiment Analysis Section
     st.header("News & Sentiment Analysis")
@@ -443,7 +519,7 @@ with col1:
 with col2:
     # Prepare competitor data for download
     comp_df = pd.DataFrame()
-    for ticker, name in competitors.items():
+    for ticker, name in competitors.items(): # type: ignore
         if ticker in comp_data:
             comp_df[name] = comp_data[ticker]['Close']
     

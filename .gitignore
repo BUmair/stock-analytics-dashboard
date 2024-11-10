@@ -1,0 +1,12 @@
+# Ignore everything
+*
+
+# But don't ignore app.py
+!app.py
+!requirements.txt
+!README.md
+!.gitignore
+
+# Ignore pycache
+__pycache__/
+*.pyc
